@@ -1,16 +1,13 @@
-import express from 'express';
-import cors from 'cors';
-import cookieParser from 'cookie-parser';
-import morgan from 'morgan';
-import { env } from './config/env.js';
-import apiRoutes from './routes/index.js';
-import { notFound, errorHandler } from './middleware/error.js';
+import express from "express";
+import cors from "cors";
+import cookieParser from "cookie-parser";
+import morgan from "morgan";
+import { env } from "./config/env.js";
+import apiRoutes from "./routes/index.js";
+import { notFound, errorHandler } from "./middleware/error.js";
 
 export function createApp() {
   const app = express();
-
-  // Behind a proxy (Render/Vercel) so `secure` cookies work over forwarded TLS.
-  app.set('trust proxy', 1);
 
   // CORS with credentials so the httpOnly auth cookie flows cross-origin.
   app.use(
@@ -20,14 +17,17 @@ export function createApp() {
     }),
   );
 
+  // Behind a proxy (Render/Vercel) so `secure` cookies work over forwarded TLS.
+  app.set("trust proxy", 1);
+
   app.use(express.json());
   app.use(cookieParser());
-  if (!env.isProduction) app.use(morgan('dev'));
+  if (!env.isProduction) app.use(morgan("dev"));
 
   // Health check.
-  app.get('/', (_req, res) => res.json({ service: 'ideavault-api', status: 'ok' }));
+  app.get("/", (_req, res) => res.json({ service: "ideavault-api", status: "ok" }));
 
-  app.use('/api', apiRoutes);
+  app.use("/api", apiRoutes);
 
   app.use(notFound);
   app.use(errorHandler);
