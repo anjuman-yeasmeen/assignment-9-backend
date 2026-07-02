@@ -44,19 +44,24 @@ npm run dev               # starts on http://localhost:5000 with --watch
 
 | Command | Description |
 | --- | --- |
-| `npm run dev` | Start with `--watch` auto-reload, loading `.env`. |
-| `npm start` | Start without watch (production). |
-| `npm run seed` | Seed the demo user and sample ideas. |
+| `npm run dev` | Local dev server with `--watch` auto-reload, loading `.env`. |
+| `npm run seed` | Seed the demo user + sample ideas and create indexes (run once). |
+
+There is intentionally no `npm start` / long-running production server: in production this runs as a **Vercel serverless function** (`api/index.js`), not a persistent process.
 
 ## Architecture
 
+This is a **serverless-first** Express app. The Express app is a plain request handler (no `app.listen`); Vercel invokes it per request via `api/index.js`. `src/server.js` exists only to serve that same handler over a local HTTP port during development, so dev and production run identical code.
+
 ```
+api/
+  index.js               # Vercel serverless entry: caches DB conn, delegates to the Express app
 src/
-  server.js              # entry: connect DB, start HTTP server, graceful shutdown
-  app.js                 # express app: CORS, json, cookies, routes, error handling
+  server.js              # LOCAL DEV ONLY: serves api/index.js over an HTTP port
+  app.js                 # express app factory (no listen): CORS, json, cookies, routes, errors
   config/
     env.js               # validated environment variables
-    db.js                # single MongoClient, collection accessors, indexes
+    db.js                # serverless MongoClient cached on globalThis, collection accessors
   lib/
     jwt.js               # sign/verify JWT, auth cookie options
     password.js          # bcrypt hashing + password-rule validation
@@ -67,7 +72,8 @@ src/
     error.js             # notFound + central error handler
   controllers/           # auth, ideas, comments, users — request/response logic
   routes/                # auth.routes, ideas.routes, index (mounts everything under /api)
-  seed.js                # demo data seeder
+  seed.js                # demo data seeder + one-time index creation
+vercel.json              # routes every path to the api/index.js function
 ```
 
 ### Auth model
@@ -101,7 +107,7 @@ Base URL: `/api`. All responses are JSON. Errors return `{ "error": "message" }`
 
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
-| `GET` | `/api/ideas` | — | List ideas. Query: `search, category, sort=trending\|newest, limit, from, to`. |
+| `GET` | `/api/ideas` | — | List ideas. Query: `search, category, sort=trending\|newest, limit, page, from, to`. Returns `{ ideas, total, page, limit, totalPages }`. `limit`+`page` drive pagination; `limit` with no `page` just caps results (e.g. home "Trending"). |
 | `POST` | `/api/ideas` | 🔒 | Create an idea. |
 | `GET` | `/api/ideas/:id` | 🔒 | Idea details; also returns `isOwner`. |
 | `PATCH` | `/api/ideas/:id` | 🔒 | Update (owner only). |
@@ -119,6 +125,17 @@ Base URL: `/api`. All responses are JSON. Errors return `{ "error": "message" }`
 | `GET` | `/api/my-interactions` | 🔒 | Ideas the user has commented on (with counts + last-commented time). |
 | `PATCH` | `/api/user` | 🔒 | Update the current user's profile (`name, photoURL`). |
 
-## Deployment
+## Deployment (Vercel)
 
-Deploy to Render (or any Node host). Set all required environment variables, point `CLIENT_ORIGIN`/`FRONTEND_URL` at the deployed client, and set `SERVER_URL` to this service's public URL (plus the matching Google OAuth redirect URI: `<SERVER_URL>/api/auth/google/callback`). The app sets `trust proxy` so `secure` cookies work behind the platform's TLS termination.
+This backend is built to run as a Vercel serverless function. `vercel.json` routes **every** path to `api/index.js`, which reuses the Express app and caches the MongoDB connection across warm invocations.
+
+1. Import the repo in Vercel (**Root Directory = repo root**, since this *is* the backend repo). No build step is required.
+2. In **Project → Settings → Environment Variables** add (Production scope):
+   - `MONGO_URI`, `JWT_SECRET` — required
+   - `CLIENT_ORIGIN` / `FRONTEND_URL` — your deployed client origin (CORS + OAuth redirects)
+   - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `SERVER_URL` — only for Google login (redirect URI: `<SERVER_URL>/api/auth/google/callback`)
+   - `NODE_ENV=production` is set automatically.
+3. Turn **off** Deployment Protection (Settings → Deployment Protection) so the browser can call the API without hitting Vercel's SSO gate.
+4. Allow Vercel's dynamic IPs in MongoDB Atlas: **Network Access → `0.0.0.0/0`**.
+
+`trust proxy` is set so `secure` cookies work behind Vercel's TLS, and cookies use `SameSite=None; Secure` in production for cross-site requests. Run `npm run seed` once (locally, against the same `MONGO_URI`) to create indexes and demo data.

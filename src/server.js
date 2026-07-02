@@ -1,27 +1,13 @@
-import { createApp } from './app.js';
-import { connectDB, closeDB } from './config/db.js';
+// Local development server ONLY. In production the app runs as the Vercel
+// serverless function in `api/index.js` — this file is never used there.
+// It simply serves that exact same handler over a normal HTTP port so local
+// dev behaves identically to production (no separate Express bootstrap, no
+// long-lived-server concerns like graceful shutdown that don't apply to
+// serverless).
+import http from 'node:http';
+import handler from '../api/index.js';
 import { env } from './config/env.js';
 
-async function start() {
-  await connectDB();
-  const app = createApp();
-
-  const server = app.listen(env.port, () => {
-    console.log(`IdeaVault API listening on http://localhost:${env.port} (${env.nodeEnv})`);
-  });
-
-  const shutdown = async (signal) => {
-    console.log(`\n${signal} received — shutting down.`);
-    server.close(async () => {
-      await closeDB();
-      process.exit(0);
-    });
-  };
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-}
-
-start().catch((err) => {
-  console.error('Failed to start server:', err);
-  process.exit(1);
+http.createServer((req, res) => handler(req, res)).listen(env.port, () => {
+  console.log(`IdeaVault API (local dev) → http://localhost:${env.port}`);
 });

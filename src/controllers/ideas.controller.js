@@ -2,17 +2,21 @@ import { ideasCollection, commentsCollection } from '../config/db.js';
 import { serializeIdea, toObjectId, CATEGORIES } from '../lib/serialize.js';
 import { ApiError } from '../lib/http.js';
 
-// GET /api/ideas — public listing with search, category filter, sort and limit.
+// GET /api/ideas — public listing with search, category filter, sort, and
+// page-based pagination.
 //   ?search=   case-insensitive match on title ($regex)
 //   ?category= exact category filter
 //   ?sort=trending|newest
-//   ?limit=    cap the number of results (home "Trending" section)
+//   ?limit=    page size / result cap (max 100). 0 = no limit (return all).
+//   ?page=     1-based page number (only applied when a limit is given).
 //   ?from= &to=  optional createdAt date range ($gte / $lte)
+// Always responds with { ideas, total, page, limit, totalPages }.
 export async function listIdeas(req, res) {
   const search = (req.query.search || '').toString().trim();
   const category = (req.query.category || '').toString().trim();
   const sort = (req.query.sort || 'newest').toString();
-  const limit = Math.min(parseInt(req.query.limit || '0', 10) || 0, 100);
+  const limit = Math.min(Math.max(parseInt(req.query.limit || '0', 10) || 0, 0), 100);
+  const page = Math.max(parseInt(req.query.page || '1', 10) || 1, 1);
   const from = req.query.from;
   const to = req.query.to;
 
@@ -36,11 +40,20 @@ export async function listIdeas(req, res) {
       ? { likes: -1, commentCount: -1, createdAt: -1 }
       : { createdAt: -1 };
 
-  let cursor = ideasCollection().find(query).sort(sortSpec);
-  if (limit) cursor = cursor.limit(limit);
+  const ideas = ideasCollection();
+  const total = await ideas.countDocuments(query);
+
+  let cursor = ideas.find(query).sort(sortSpec);
+  if (limit) cursor = cursor.skip((page - 1) * limit).limit(limit);
   const docs = await cursor.toArray();
 
-  res.json({ ideas: docs.map(serializeIdea) });
+  res.json({
+    ideas: docs.map(serializeIdea),
+    total,
+    page,
+    limit,
+    totalPages: limit ? Math.max(Math.ceil(total / limit), 1) : 1,
+  });
 }
 
 // POST /api/ideas — create an idea (authenticated).
